@@ -1,14 +1,263 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { Users, MessageCircle, Clock3, TrendingUp, Search, Plus, MoreHorizontal } from 'lucide-react';
-import './styles.css';
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { createClient } from "@supabase/supabase-js";
+import "./styles.css";
 
-const leads = [
-  {name:'MM Black Design', phone:'+234 806 777 7533', interest:'Website / conversion', status:'Interested', value:'₦150,000', time:'12 min ago'},
-  {name:'Blushing Beauty Studio', phone:'+234 805 745 1244', interest:'Booking website', status:'New', value:'₦75,000', time:'34 min ago'},
-  {name:'Fashion By Excel', phone:'+234 805 478 2178', interest:'E-commerce', status:'Proposal', value:'₦180,000', time:'Yesterday'},
-  {name:'Xavimoore Bespoke', phone:'+234 808 800 6661', interest:'Website', status:'Follow-up', value:'₦120,000', time:'2 days ago'}
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+);
+
+const stages = [
+  "new",
+  "contacted",
+  "interested",
+  "proposal",
+  "negotiating",
+  "follow_up",
+  "won",
 ];
-const stats=[['Total leads','24','+18%','leads'],['Hot leads','7','+3 this week','hot'],['Follow-ups due','5','2 overdue','clock'],['Won deals','3','₦410k value','won']];
-function App(){return <div className="app"><aside><div className="brand"><div className="logo">R</div><div><b>ROYEXA</b><span>WhatsApp CRM</span></div></div><nav><a className="active">Overview</a><a>Leads</a><a>Conversations</a><a>Follow-ups</a><a>Pipeline</a></nav><div className="sideBottom"><small>Sales workspace</small><strong>David / ROYEXA HUB</strong></div></aside><main><header><div><p className="eyebrow">SALES COMMAND CENTER</p><h1>Good evening, David.</h1><p className="muted">Keep every WhatsApp prospect moving toward a deal.</p></div><button className="primary"><Plus size={18}/> Add lead</button></header><section className="stats">{stats.map((s,i)=><div className="stat" key={s[0]}><div className="statTop"><span>{s[0]}</span><span className={'ico i'+i}>{i===0?<Users size={18}/>:i===1?<TrendingUp size={18}/>:i===2?<Clock3 size={18}/>:<TrendingUp size={18}/>}</span></div><b>{s[1]}</b><small>{s[2]}</small></div>)}</section><section className="panel"><div className="panelHead"><div><h2>Active leads</h2><p className="muted">Your latest prospects and sales opportunities</p></div><div className="actions"><div className="search"><Search size={17}/><input placeholder="Search leads..."/></div><button className="filter">All statuses</button></div></div><div className="table"><div className="row head"><span>Lead</span><span>Interest</span><span>Status</span><span>Deal value</span><span>Last activity</span><span></span></div>{leads.map(l=><div className="row" key={l.phone}><div className="lead"><div className="avatar">{l.name[0]}</div><div><strong>{l.name}</strong><small>{l.phone}</small></div></div><span>{l.interest}</span><span><em className={'badge '+l.status.toLowerCase().replace(' ','-')}>{l.status}</em></span><strong>{l.value}</strong><span className="muted">{l.time}</span><MoreHorizontal size={18}/></div>)}</div></section><section className="bottom"><div className="panel compact"><div className="panelHead"><div><h2>Follow-ups</h2><p className="muted">Never let a warm lead go cold.</p></div><a>View all</a></div><div className="follow"><div><b>MM Black Design</b><span>Website conversion concept</span></div><strong>Today · 4:00 PM</strong></div><div className="follow"><div><b>Fashion By Excel</b><span>Proposal review</span></div><strong>Tomorrow · 10:00 AM</strong></div></div><div className="panel compact pipeline"><div className="panelHead"><div><h2>Pipeline</h2><p className="muted">Deal movement</p></div></div><div className="bars"><div><span>New</span><i style={{width:'78%'}}></i><b>8</b></div><div><span>Interested</span><i style={{width:'58%'}}></i><b>7</b></div><div><span>Proposal</span><i style={{width:'38%'}}></i><b>3</b></div><div><span>Won</span><i style={{width:'24%'}}></i><b>3</b></div></div></div></section></main></div>}
-createRoot(document.getElementById('root')).render(<App/>);
+
+const labels = {
+  new: "New",
+  contacted: "Contacted",
+  interested: "Interested",
+  proposal: "Proposal",
+  negotiating: "Negotiating",
+  follow_up: "Follow-up",
+  won: "Won",
+};
+
+function App() {
+  const [leads, setLeads] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [error, setError] = useState("");
+
+  async function loadLeads() {
+    const { data, error } = await supabase
+      .from("leads")
+      .select("*")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setLeads(data || []);
+  }
+
+  useEffect(() => {
+    loadLeads();
+
+    const channel = supabase
+      .channel("leads-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "leads",
+        },
+        () => loadLeads()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  async function updateStatus(id, status) {
+    const { error } = await supabase
+      .from("leads")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    await loadLeads();
+
+    const updated = leads.find((lead) => lead.id === id);
+
+    if (updated) {
+      setSelected({
+        ...updated,
+        status,
+      });
+    }
+  }
+
+  function count(status) {
+    return leads.filter((lead) => lead.status === status).length;
+  }
+
+  return (
+    <div className="app">
+      <aside>
+        <div className="brand">
+          ROYEXA <span>CRM</span>
+        </div>
+
+        <p>WhatsApp sales command center</p>
+
+        <nav>
+          <b>Dashboard</b>
+          <span>Leads</span>
+          <span>Follow-ups</span>
+          <span>Messages</span>
+        </nav>
+      </aside>
+
+      <main>
+        <header>
+          <small>SALES PIPELINE</small>
+          <h1>Good to see you.</h1>
+          <p>
+            Manage prospects, conversations and follow-ups from one place.
+          </p>
+        </header>
+
+        <section className="stats">
+          {[
+            ["New", "new"],
+            ["Interested", "interested"],
+            ["Proposals", "proposal"],
+            ["Follow-ups", "follow_up"],
+            ["Won", "won"],
+          ].map(([name, status]) => (
+            <div key={status}>
+              <small>{name}</small>
+              <strong>{count(status)}</strong>
+            </div>
+          ))}
+        </section>
+
+        {error && <div className="error">{error}</div>}
+
+        <section className="panel">
+          <div className="panelHead">
+            <h2>Lead pipeline</h2>
+            <span>{leads.length} total leads</span>
+          </div>
+
+          <div className="pipeline">
+            {stages.map((stage) => (
+              <div className="column" key={stage}>
+                <div className="columnHead">
+                  <b>{labels[stage]}</b>
+                  <span>{count(stage)}</span>
+                </div>
+
+                {leads
+                  .filter((lead) => lead.status === stage)
+                  .map((lead) => (
+                    <button
+                      className="lead"
+                      key={lead.id}
+                      onClick={() => setSelected(lead)}
+                    >
+                      <strong>
+                        {lead.name ||
+                          lead.whatsapp_name ||
+                          lead.phone}
+                      </strong>
+
+                      <small>
+                        {lead.business_name || "No business added"}
+                      </small>
+
+                      <small>
+                        {lead.interest || "General enquiry"}
+                      </small>
+
+                      {lead.deal_value && (
+                        <em>
+                          ₦
+                          {Number(lead.deal_value).toLocaleString()}
+                        </em>
+                      )}
+                    </button>
+                  ))}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {selected && (
+          <div className="drawer">
+            <button
+              className="close"
+              onClick={() => setSelected(null)}
+            >
+              ×
+            </button>
+
+            <small>LEAD DETAILS</small>
+
+            <h2>
+              {selected.name ||
+                selected.whatsapp_name ||
+                selected.phone}
+            </h2>
+
+            <p>
+              {selected.business_name || "No business name"}
+            </p>
+
+            <div className="details">
+              <b>WhatsApp</b>
+              <span>{selected.phone}</span>
+
+              <b>Interest</b>
+              <span>{selected.interest || "—"}</span>
+
+              <b>Deal value</b>
+              <span>
+                {selected.deal_value
+                  ? `₦${Number(
+                      selected.deal_value
+                    ).toLocaleString()}`
+                  : "—"}
+              </span>
+
+              <b>Next follow-up</b>
+              <span>
+                {selected.next_follow_up_at
+                  ? new Date(
+                      selected.next_follow_up_at
+                    ).toLocaleString()
+                  : "Not scheduled"}
+              </span>
+            </div>
+
+            <label>
+              Status
+
+              <select
+                value={selected.status}
+                onChange={(event) =>
+                  updateStatus(
+                    selected.id,
+                    event.target.value
+                  )
+                }
+              >
+                {stages.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {labels[stage]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);
