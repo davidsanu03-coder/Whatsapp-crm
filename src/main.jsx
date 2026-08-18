@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
 import "./styles.css";
@@ -28,6 +28,18 @@ const labels = {
   won: "Won",
 };
 
+const emptyLead = {
+  name: "",
+  phone: "",
+  whatsapp_name: "",
+  business_name: "",
+  interest: "",
+  deal_value: "",
+  status: "new",
+  next_follow_up_at: "",
+  notes: "",
+};
+
 function Login() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
@@ -44,11 +56,8 @@ function Login() {
       },
     });
 
-    if (error) {
-      setError(error.message);
-    } else {
-      setSent(true);
-    }
+    if (error) setError(error.message);
+    else setSent(true);
   }
 
   return (
@@ -77,19 +86,13 @@ function Login() {
               type="email"
               placeholder="Your email address"
               value={email}
-              onChange={(event) =>
-                setEmail(event.target.value)
-              }
+              onChange={(event) => setEmail(event.target.value)}
               required
             />
 
-            <button type="submit">
-              Send magic link
-            </button>
+            <button type="submit">Send magic link</button>
 
-            {error && (
-              <div className="error">{error}</div>
-            )}
+            {error && <div className="error">{error}</div>}
           </form>
         )}
       </div>
@@ -100,15 +103,17 @@ function Login() {
 function Dashboard({ session }) {
   const [leads, setLeads] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState("");
+  const [form, setForm] = useState(emptyLead);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function loadLeads() {
     const { data, error } = await supabase
       .from("leads")
       .select("*")
-      .order("updated_at", {
-        ascending: false,
-      });
+      .order("updated_at", { ascending: false });
 
     if (error) {
       setError(error.message);
@@ -139,6 +144,35 @@ function Dashboard({ session }) {
     };
   }, []);
 
+  async function addLead(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+
+    const payload = {
+      ...form,
+      deal_value: form.deal_value
+        ? Number(form.deal_value)
+        : null,
+      next_follow_up_at: form.next_follow_up_at || null,
+    };
+
+    const { error } = await supabase
+      .from("leads")
+      .insert(payload);
+
+    setSaving(false);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setForm(emptyLead);
+    setShowAdd(false);
+    await loadLeads();
+  }
+
   async function updateStatus(id, status) {
     const { error } = await supabase
       .from("leads")
@@ -153,16 +187,39 @@ function Dashboard({ session }) {
     await loadLeads();
 
     setSelected((current) =>
-      current
-        ? { ...current, status }
-        : current
+      current ? { ...current, status } : current
     );
   }
 
   function count(status) {
-    return leads.filter(
-      (lead) => lead.status === status
-    ).length;
+    return leads.filter((lead) => lead.status === status).length;
+  }
+
+  const filteredLeads = useMemo(() => {
+    const query = search.toLowerCase().trim();
+
+    if (!query) return leads;
+
+    return leads.filter((lead) =>
+      [
+        lead.name,
+        lead.phone,
+        lead.whatsapp_name,
+        lead.business_name,
+        lead.interest,
+      ]
+        .filter(Boolean)
+        .some((value) =>
+          String(value).toLowerCase().includes(query)
+        )
+    );
+  }, [leads, search]);
+
+  function updateField(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
   }
 
   return (
@@ -183,9 +240,7 @@ function Dashboard({ session }) {
 
         <button
           className="logout"
-          onClick={() =>
-            supabase.auth.signOut()
-          }
+          onClick={() => supabase.auth.signOut()}
         >
           Sign out
         </button>
@@ -194,12 +249,8 @@ function Dashboard({ session }) {
       <main>
         <header>
           <small>SALES PIPELINE</small>
-
           <h1>Good to see you.</h1>
-
-          <p>
-            {session.user.email}
-          </p>
+          <p>{session.user.email}</p>
         </header>
 
         <section className="stats">
@@ -217,43 +268,46 @@ function Dashboard({ session }) {
           ))}
         </section>
 
-        {error && (
-          <div className="error">
-            {error}
-          </div>
-        )}
+        {error && <div className="error">{error}</div>}
 
         <section className="panel">
           <div className="panelHead">
-            <h2>Lead pipeline</h2>
-            <span>
-              {leads.length} total leads
-            </span>
+            <div>
+              <h2>Leads</h2>
+              <span>{leads.length} total leads</span>
+            </div>
+
+            <button
+              className="primaryButton"
+              onClick={() => setShowAdd(true)}
+            >
+              + Add lead
+            </button>
+          </div>
+
+          <div className="toolbar">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name, phone, business..."
+            />
           </div>
 
           <div className="pipeline">
             {stages.map((stage) => (
-              <div
-                className="column"
-                key={stage}
-              >
+              <div className="column" key={stage}>
                 <div className="columnHead">
                   <b>{labels[stage]}</b>
                   <span>{count(stage)}</span>
                 </div>
 
-                {leads
-                  .filter(
-                    (lead) =>
-                      lead.status === stage
-                  )
+                {filteredLeads
+                  .filter((lead) => lead.status === stage)
                   .map((lead) => (
                     <button
                       className="lead"
                       key={lead.id}
-                      onClick={() =>
-                        setSelected(lead)
-                      }
+                      onClick={() => setSelected(lead)}
                     >
                       <strong>
                         {lead.name ||
@@ -262,13 +316,11 @@ function Dashboard({ session }) {
                       </strong>
 
                       <small>
-                        {lead.business_name ||
-                          "No business added"}
+                        {lead.business_name || "No business"}
                       </small>
 
                       <small>
-                        {lead.interest ||
-                          "General enquiry"}
+                        {lead.interest || "General enquiry"}
                       </small>
 
                       {lead.deal_value && (
@@ -286,13 +338,122 @@ function Dashboard({ session }) {
           </div>
         </section>
 
+        {showAdd && (
+          <div className="modalBackdrop">
+            <form className="modal" onSubmit={addLead}>
+              <button
+                type="button"
+                className="close"
+                onClick={() => setShowAdd(false)}
+              >
+                ×
+              </button>
+
+              <small>NEW LEAD</small>
+              <h2>Add a client</h2>
+
+              <div className="formGrid">
+                <input
+                  placeholder="Client name *"
+                  value={form.name}
+                  onChange={(e) =>
+                    updateField("name", e.target.value)
+                  }
+                  required
+                />
+
+                <input
+                  placeholder="WhatsApp number *"
+                  value={form.phone}
+                  onChange={(e) =>
+                    updateField("phone", e.target.value)
+                  }
+                  required
+                />
+
+                <input
+                  placeholder="WhatsApp display name"
+                  value={form.whatsapp_name}
+                  onChange={(e) =>
+                    updateField("whatsapp_name", e.target.value)
+                  }
+                />
+
+                <input
+                  placeholder="Business name"
+                  value={form.business_name}
+                  onChange={(e) =>
+                    updateField("business_name", e.target.value)
+                  }
+                />
+
+                <input
+                  placeholder="Service / interest"
+                  value={form.interest}
+                  onChange={(e) =>
+                    updateField("interest", e.target.value)
+                  }
+                />
+
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="Potential deal value"
+                  value={form.deal_value}
+                  onChange={(e) =>
+                    updateField("deal_value", e.target.value)
+                  }
+                />
+
+                <select
+                  value={form.status}
+                  onChange={(e) =>
+                    updateField("status", e.target.value)
+                  }
+                >
+                  {stages.map((stage) => (
+                    <option key={stage} value={stage}>
+                      {labels[stage]}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="datetime-local"
+                  value={form.next_follow_up_at}
+                  onChange={(e) =>
+                    updateField(
+                      "next_follow_up_at",
+                      e.target.value
+                    )
+                  }
+                />
+              </div>
+
+              <textarea
+                placeholder="Notes about this client..."
+                value={form.notes}
+                onChange={(e) =>
+                  updateField("notes", e.target.value)
+                }
+              />
+
+              <button
+                className="primaryButton full"
+                type="submit"
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Create lead"}
+              </button>
+            </form>
+          </div>
+        )}
+
         {selected && (
           <div className="drawer">
             <button
               className="close"
-              onClick={() =>
-                setSelected(null)
-              }
+              onClick={() => setSelected(null)}
             >
               ×
             </button>
@@ -306,20 +467,15 @@ function Dashboard({ session }) {
             </h2>
 
             <p>
-              {selected.business_name ||
-                "No business name"}
+              {selected.business_name || "No business name"}
             </p>
 
             <div className="details">
               <b>WhatsApp</b>
-              <span>
-                {selected.phone}
-              </span>
+              <span>{selected.phone}</span>
 
               <b>Interest</b>
-              <span>
-                {selected.interest || "—"}
-              </span>
+              <span>{selected.interest || "—"}</span>
 
               <b>Deal value</b>
               <span>
@@ -338,6 +494,9 @@ function Dashboard({ session }) {
                     ).toLocaleString()
                   : "Not scheduled"}
               </span>
+
+              <b>Notes</b>
+              <span>{selected.notes || "—"}</span>
             </div>
 
             <label>
@@ -353,10 +512,7 @@ function Dashboard({ session }) {
                 }
               >
                 {stages.map((stage) => (
-                  <option
-                    key={stage}
-                    value={stage}
-                  >
+                  <option key={stage} value={stage}>
                     {labels[stage]}
                   </option>
                 ))}
@@ -370,28 +526,22 @@ function Dashboard({ session }) {
 }
 
 function App() {
-  const [session, setSession] =
-    useState(null);
-
-  const [loading, setLoading] =
-    useState(true);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
-        setSession(data.session);
-        setLoading(false);
-      });
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
 
     const {
       data: listener,
-    } =
-      supabase.auth.onAuthStateChange(
-        (_event, session) => {
-          setSession(session);
-        }
-      );
+    } = supabase.auth.onAuthStateChange(
+      (_event, currentSession) => {
+        setSession(currentSession);
+      }
+    );
 
     return () => {
       listener.subscription.unsubscribe();
@@ -413,6 +563,6 @@ function App() {
   return <Dashboard session={session} />;
 }
 
-createRoot(
-  document.getElementById("root")
-).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <App />
+);
