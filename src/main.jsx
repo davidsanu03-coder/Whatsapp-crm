@@ -30,7 +30,22 @@ function Dashboard({session}){
   const followUps=useMemo(()=>leads.filter(l=>l.next_follow_up_at).sort((a,b)=>new Date(a.next_follow_up_at)-new Date(b.next_follow_up_at)),[leads]);
   function updateField(f,v){setForm(c=>({...c,[f]:v}))}
   function openEmail(lead){if(!lead.email)return;const subject=encodeURIComponent(`Following up with ${lead.name||"you"}`);const body=encodeURIComponent(`Hi ${lead.name||"there"},\n\nI’m following up regarding ${lead.interest||"your enquiry"}.\n\nBest regards,\nROYEXA`);window.location.href=`mailto:${lead.email}?subject=${subject}&body=${body}`}
-  async function askAI(action){if(!selected)return;setAiLoading(true);setAiResult("");const {data,error}=await supabase.functions.invoke("ai-crm-assistant",{body:{action,lead:selected,messages:activities}});setAiLoading(false);if(error){setAiResult(error.message);return}setAiResult(data?.result||data?.message||data?.error||"No AI result.")}
+  async function askAI(action){
+    if(!selected)return;
+    setAiLoading(true);setAiResult("");setError("");
+    try {
+      const {data,error}=await supabase.functions.invoke("ai-crm-assistant",{body:{action,lead:selected,messages:activities}});
+      if(error){
+        let detail="";
+        try { if(error.context){ const body=await error.context.json(); detail=body?.error||body?.message||JSON.stringify(body); } } catch(_) {}
+        throw new Error(detail||error.message||"AI request failed.");
+      }
+      if(data?.ok===false) throw new Error(data.error||"AI request failed.");
+      setAiResult(data?.result||data?.message||"No AI result.");
+    } catch(e) {
+      setAiResult(`AI error: ${e?.message||"Unknown error"}`);
+    } finally { setAiLoading(false); }
+  }
 
   return <div className="app"><aside><div className="brand">ROYEXA <span>CRM</span></div><p>Sales command center</p><nav><button className={activeView==="dashboard"?"navActive":""} onClick={()=>setActiveView("dashboard")}>Dashboard</button><button className={activeView==="followups"?"navActive":""} onClick={()=>setActiveView("followups")}>Follow-ups <span>{followUps.length}</span></button><button className={activeView==="leads"?"navActive":""} onClick={()=>setActiveView("leads")}>Leads</button><button className={activeView==="messages"?"navActive":""} onClick={()=>setActiveView("messages")}>Messages</button></nav><button className="logout" onClick={()=>supabase.auth.signOut()}>Sign out</button></aside>
   <main><header><small>ROYEXA CRM</small><h1>{activeView==="followups"?"Follow-ups":activeView==="messages"?"Messages":"Good to see you."}</h1><p>{session.user.email}</p></header>
