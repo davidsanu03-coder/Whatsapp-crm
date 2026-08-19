@@ -1,0 +1,85 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+const stages = ["new", "contacted", "interested", "proposal", "negotiating", "follow_up", "won"];
+const labels = { new: "New", contacted: "Contacted", interested: "Interested", proposal: "Proposal", negotiating: "Negotiating", follow_up: "Follow-up", won: "Won" };
+
+function Assistant() {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState([{ role: "assistant", text: "Hi 👋 I’m your ROYEXA AI Assistant. Ask me about your CRM, sales, writing, research, or anything else." }]);
+  const [leads, setLeads] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState([]);
+  const [error, setError] = useState("");
+
+  async function loadLeads() {
+    const { data } = await supabase.from("leads").select("*").order("updated_at", { ascending: false });
+    setLeads(data || []);
+  }
+  useEffect(() => { loadLeads(); }, []);
+
+  const context = useMemo(() => leads.slice(0, 100).map(l => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, business_name: l.business_name, interest: l.interest, status: l.status, deal_value: l.deal_value, next_follow_up_at: l.next_follow_up_at })), [leads]);
+
+  async function sendMessage(e) {
+    e?.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput(""); setError(""); setBusy(true);
+    const next = [...messages, { role: "user", text }];
+    setMessages(next);
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "chat", message: text, history: next.slice(-12), leads: context } });
+      if (error) throw new Error(error.message || "AI request failed.");
+      if (!data?.ok) throw new Error(data?.error || "AI request failed.");
+      setMessages(current => [...current, { role: "assistant", text: data.result || "No response." }]);
+      if (Array.isArray(data.actions)) setPending(data.actions);
+    } catch (e) {
+      setError(e.message || "AI request failed.");
+    } finally { setBusy(false); }
+  }
+
+  async function execute(action) {
+    setBusy(true); setError("");
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "execute_task", task: action } });
+      if (error) throw new Error(error.message || "Task execution failed.");
+      if (!data?.ok) throw new Error(data?.error || "Task execution failed.");
+      setMessages(current => [...current, { role: "assistant", text: `✓ Done: ${data.message || action.label}` }]);
+      setPending(current => current.filter(a => a.id !== action.id));
+      await loadLeads();
+    } catch (e) { setError(e.message || "Task execution failed."); }
+    finally { setBusy(false); }
+  }
+
+  if (!open) return <button onClick={() => setOpen(true)} aria-label="Open ROYEXA AI Assistant" style={fab}>🤖 AI Assistant</button>;
+  return <div style={panel}>
+    <div style={head}><div><strong>🤖 ROYEXA AI</strong><small> Assistant + approved actions</small></div><button onClick={() => setOpen(false)} style={icon}>×</button></div>
+    <div style={body}>
+      {messages.map((m, i) => <div key={i} style={m.role === "user" ? userBubble : aiBubble}><b>{m.role === "user" ? "You" : "AI"}</b><div style={{ whiteSpace: "pre-wrap", marginTop: 5 }}>{m.text}</div></div>)}
+      {pending.length > 0 && <div style={actionsBox}><b>Approval required</b>{pending.map(a => <div key={a.id} style={actionRow}><span>{a.label}</span><button disabled={busy} onClick={() => execute(a)} style={approve}>Approve & execute</button></div>)}</div>}
+      {error && <div style={errorBox}>{error}</div>}
+      {busy && <div style={typing}>Working…</div>}
+    </div>
+    <form onSubmit={sendMessage} style={composer}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask anything or give me a task…"/><button disabled={busy || !input.trim()}>➤</button></form>
+  </div>;
+}
+
+const fab = { position:"fixed", right:20, bottom:20, zIndex:9999, border:0, borderRadius:999, padding:"13px 17px", background:"#111", color:"#fff", fontWeight:700, boxShadow:"0 10px 30px rgba(0,0,0,.2)", cursor:"pointer" };
+const panel = { position:"fixed", right:20, bottom:20, width:"min(390px, calc(100vw - 32px))", height:"min(650px, calc(100vh - 40px))", zIndex:10000, background:"#fff", border:"1px solid #ddd", borderRadius:20, boxShadow:"0 20px 60px rgba(0,0,0,.25)", display:"flex", flexDirection:"column", overflow:"hidden", fontFamily:"Inter, system-ui, sans-serif" };
+const head = { padding:"16px 18px", borderBottom:"1px solid #eee", display:"flex", justifyContent:"space-between", alignItems:"center" };
+const icon = { border:0, background:"transparent", fontSize:24, cursor:"pointer" };
+const body = { flex:1, overflowY:"auto", padding:14, background:"#f7f7f8" };
+const userBubble = { maxWidth:"88%", margin:"8px 0 8px auto", padding:12, borderRadius:"16px 16px 4px 16px", background:"#111", color:"#fff" };
+const aiBubble = { maxWidth:"92%", margin:"8px auto 8px 0", padding:12, borderRadius:"16px 16px 16px 4px", background:"#fff", border:"1px solid #e6e6e6" };
+const actionsBox = { margin:"12px 0", padding:12, borderRadius:14, background:"#fff8e1", border:"1px solid #f0d889" };
+const actionRow = { display:"flex", gap:8, alignItems:"center", justifyContent:"space-between", padding:"9px 0", borderTop:"1px solid #f1e3b2", marginTop:8 };
+const approve = { border:0, borderRadius:9, padding:"8px 10px", background:"#111", color:"#fff", cursor:"pointer", fontWeight:600 };
+const errorBox = { margin:"8px 0", padding:10, borderRadius:10, background:"#ffecec", color:"#9b1c1c" };
+const typing = { color:"#777", padding:8 };
+const composer = { display:"flex", gap:8, padding:12, borderTop:"1px solid #eee", background:"#fff" };
+
+function mount() { const node = document.createElement("div"); node.id = "royexa-ai-root"; document.body.appendChild(node); createRoot(node).render(<Assistant />); }
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount); else mount();
