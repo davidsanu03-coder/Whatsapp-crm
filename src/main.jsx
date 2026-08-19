@@ -57,6 +57,96 @@ function Login() {
   );
 }
 
+function Onboarding({ session, onComplete }) {
+  const [businessName, setBusinessName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [industry, setIndustry] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("workspaces")
+        .select("business_name, display_name, industry")
+        .eq("owner_id", session.user.id)
+        .maybeSingle();
+      if (!active) return;
+      if (error) setError(error.message);
+      if (data) {
+        setBusinessName(data.business_name || "");
+        setDisplayName(data.display_name || "");
+        setIndustry(data.industry || "");
+      }
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [session.user.id]);
+
+  async function save(e) {
+    e.preventDefault();
+    setError("");
+    setSaving(true);
+    const payload = {
+      business_name: businessName.trim(),
+      display_name: (displayName.trim() || businessName.trim()),
+      industry: industry.trim(),
+    };
+    const { data: existing, error: findError } = await supabase
+      .from("workspaces")
+      .select("id")
+      .eq("owner_id", session.user.id)
+      .maybeSingle();
+    if (findError) {
+      setError(findError.message);
+      setSaving(false);
+      return;
+    }
+    const result = existing
+      ? await supabase.from("workspaces").update(payload).eq("id", existing.id).select().single()
+      : await supabase.from("workspaces").insert({ ...payload, owner_id: session.user.id, timezone: "Africa/Lagos" }).select().single();
+    setSaving(false);
+    if (result.error) {
+      setError(result.error.message);
+      return;
+    }
+    onComplete(result.data);
+  }
+
+  if (loading) return <div className="center">Preparing your ROYEXA workspace...</div>;
+
+  return (
+    <div className="auth">
+      <div className="authCard">
+        <div className="brand">ROYEXA <span>CRM</span></div>
+        <small>QUICK SETUP</small>
+        <h1>Set up your workspace.</h1>
+        <p>Tell us a little about your business. You can change these details later.</p>
+        <form onSubmit={save}>
+          <input placeholder="Business name *" value={businessName} onChange={(e) => setBusinessName(e.target.value)} required />
+          <input placeholder="Your display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          <select value={industry} onChange={(e) => setIndustry(e.target.value)}>
+            <option value="">Select your industry</option>
+            <option>Fashion & Beauty</option>
+            <option>E-commerce</option>
+            <option>Real Estate</option>
+            <option>Marketing & Agency</option>
+            <option>Professional Services</option>
+            <option>Technology</option>
+            <option>Education</option>
+            <option>Health & Wellness</option>
+            <option>Other</option>
+          </select>
+          {error && <div className="error">{error}</div>}
+          <button type="submit" disabled={saving}>{saving ? "Setting up..." : "Set up my CRM"}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ session }) {
   const [leads, setLeads] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -77,115 +167,64 @@ function Dashboard({ session }) {
     if (error) setError(error.message);
     else setLeads(data || []);
   }
-
   async function loadActivities(leadId) {
     const { data } = await supabase.from("messages").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(30);
     setActivities(data || []);
   }
-
   useEffect(() => {
     loadLeads();
     const channel = supabase.channel("crm-leads").on("postgres_changes", { event: "*", schema: "public", table: "leads" }, loadLeads).subscribe();
     return () => supabase.removeChannel(channel);
   }, []);
-
-  useEffect(() => {
-    if (selected) loadActivities(selected.id);
-  }, [selected]);
+  useEffect(() => { if (selected) loadActivities(selected.id); }, [selected]);
 
   async function updateLead(id, patch) {
     const { data, error } = await supabase.from("leads").update(patch).eq("id", id).select().single();
-    if (error) {
-      setError(error.message);
-      return false;
-    }
+    if (error) { setError(error.message); return false; }
     setSelected((current) => current ? { ...current, ...data } : current);
     await loadLeads();
     return true;
   }
-
-  async function updateStatus(id, status) {
-    return updateLead(id, { status });
-  }
-
+  async function updateStatus(id, status) { return updateLead(id, { status }); }
   async function addLead(e) {
-    e.preventDefault();
-    setSaving(true);
-    setError("");
-    const payload = {
-      ...form,
-      deal_value: form.deal_value ? Number(form.deal_value) : null,
-      next_follow_up_at: form.next_follow_up_at || null,
-    };
+    e.preventDefault(); setSaving(true); setError("");
+    const payload = { ...form, deal_value: form.deal_value ? Number(form.deal_value) : null, next_follow_up_at: form.next_follow_up_at || null };
     const { error } = await supabase.from("leads").insert(payload);
     setSaving(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
-    setForm(emptyLead);
-    setShowAdd(false);
-    await loadLeads();
+    if (error) { setError(error.message); return; }
+    setForm(emptyLead); setShowAdd(false); await loadLeads();
   }
-
   function parseAIRecommendations(text) {
-    const t = text.toLowerCase();
-    const actions = [];
-    const add = (type, label, patch) => {
-      if (!actions.some((a) => a.type === type)) actions.push({ type, label, patch });
-    };
-    if (t.includes("contacted") || t.includes("first contact") || t.includes("initiate first contact") || t.includes("reach out")) {
-      add("status_contacted", "Mark as Contacted", { status: "contacted" });
-    }
+    const t = text.toLowerCase(); const actions = [];
+    const add = (type, label, patch) => { if (!actions.some((a) => a.type === type)) actions.push({ type, label, patch }); };
+    if (t.includes("contacted") || t.includes("first contact") || t.includes("initiate first contact") || t.includes("reach out")) add("status_contacted", "Mark as Contacted", { status: "contacted" });
     if (t.includes("interested")) add("status_interested", "Move to Interested", { status: "interested" });
     if (t.includes("proposal")) add("status_proposal", "Move to Proposal", { status: "proposal" });
     if (t.includes("negotiat")) add("status_negotiating", "Move to Negotiating", { status: "negotiating" });
-    if (t.includes("follow-up") || t.includes("follow up") || t.includes("schedule a follow")) {
-      add("status_followup", "Move to Follow-up", { status: "follow_up" });
-    }
+    if (t.includes("follow-up") || t.includes("follow up") || t.includes("schedule a follow")) add("status_followup", "Move to Follow-up", { status: "follow_up" });
     if (t.includes("won") || t.includes("close the deal")) add("status_won", "Mark as Won", { status: "won" });
     return actions;
   }
-
   async function applyAIAction(action) {
-    if (!selected || !action) return;
-    setApplyingAI(true);
-    setError("");
-    try {
-      const ok = await updateLead(selected.id, action.patch);
-      if (ok) setAiResult((current) => `${current}\n\n✓ Applied: ${action.label}.`);
-    } finally {
-      setApplyingAI(false);
-    }
+    if (!selected || !action) return; setApplyingAI(true); setError("");
+    try { const ok = await updateLead(selected.id, action.patch); if (ok) setAiResult((current) => `${current}\n\n✓ Applied: ${action.label}.`); }
+    finally { setApplyingAI(false); }
   }
-
   async function askAI(action) {
-    if (!selected) return;
-    setAiLoading(true);
-    setAiResult("");
-    setAiAction(action);
-    setError("");
+    if (!selected) return; setAiLoading(true); setAiResult(""); setAiAction(action); setError("");
     try {
-      const { data, error } = await supabase.functions.invoke("ai-crm-assistant", {
-        body: { action, lead: selected, messages: activities },
-      });
+      const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action, lead: selected, messages: activities } });
       if (error) throw new Error(error.message || "AI request failed.");
       if (data?.ok === false) throw new Error(data.error || "AI request failed.");
       setAiResult(data?.result || data?.message || "No AI result.");
-    } catch (e) {
-      setAiResult(`AI error: ${e?.message || "Unknown error"}`);
-    } finally {
-      setAiLoading(false);
-    }
+    } catch (e) { setAiResult(`AI error: ${e?.message || "Unknown error"}`); }
+    finally { setAiLoading(false); }
   }
-
   async function deleteLead(lead) {
     if (!window.confirm(`Delete ${lead.name || lead.phone || "this lead"}? This cannot be undone.`)) return;
     const { error } = await supabase.from("leads").delete().eq("id", lead.id);
-    if (error) setError(error.message);
-    else { setSelected(null); await loadLeads(); }
+    if (error) setError(error.message); else { setSelected(null); await loadLeads(); }
   }
-
   function count(status) { return leads.filter((lead) => lead.status === status).length; }
   function updateField(field, value) { setForm((current) => ({ ...current, [field]: value })); }
   function openEmail(lead) {
@@ -194,21 +233,17 @@ function Dashboard({ session }) {
     const body = encodeURIComponent(`Hi ${lead.name || "there"},\n\nI’m following up regarding ${lead.interest || "your enquiry"}.\n\nBest regards,\nROYEXA`);
     window.location.href = `mailto:${lead.email}?subject=${subject}&body=${body}`;
   }
-
   const filteredLeads = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return leads;
+    const q = search.toLowerCase().trim(); if (!q) return leads;
     return leads.filter((lead) => [lead.name, lead.email, lead.phone, lead.whatsapp_name, lead.business_name, lead.interest].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
   }, [leads, search]);
-
   const followUps = useMemo(() => leads.filter((lead) => lead.next_follow_up_at).sort((a, b) => new Date(a.next_follow_up_at) - new Date(b.next_follow_up_at)), [leads]);
   const aiActions = aiAction === "next_action" ? parseAIRecommendations(aiResult) : [];
 
   return (
     <div className="app">
       <aside>
-        <div className="brand">ROYEXA <span>CRM</span></div>
-        <p>Sales command center</p>
+        <div className="brand">ROYEXA <span>CRM</span></div><p>Sales command center</p>
         <nav>
           <button className={activeView === "dashboard" ? "navActive" : ""} onClick={() => setActiveView("dashboard")}>Dashboard</button>
           <button className={activeView === "followups" ? "navActive" : ""} onClick={() => setActiveView("followups")}>Follow-ups <span>{followUps.length}</span></button>
@@ -217,92 +252,19 @@ function Dashboard({ session }) {
         </nav>
         <button className="logout" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </aside>
-
       <main>
-        <header>
-          <small>ROYEXA CRM</small>
-          <h1>{activeView === "followups" ? "Follow-ups" : activeView === "messages" ? "Messages" : "Good to see you."}</h1>
-          <p>{session.user.email}</p>
-        </header>
+        <header><small>ROYEXA CRM</small><h1>{activeView === "followups" ? "Follow-ups" : activeView === "messages" ? "Messages" : "Good to see you."}</h1><p>{session.user.email}</p></header>
         {error && <div className="error">{error}</div>}
-
         {activeView === "followups" ? (
-          <section className="panel">
-            <div className="panelHead"><div><h2>Follow-up queue</h2><span>{followUps.length} scheduled</span></div><button className="primaryButton" onClick={() => setActiveView("dashboard")}>Back to dashboard</button></div>
-            <div className="followupList">
-              {followUps.length === 0 ? <div className="empty">No follow-ups scheduled yet.</div> : followUps.map((lead) => (
-                <button className="followupItem" key={lead.id} onClick={() => { setSelected(lead); setActiveView("dashboard"); }}>
-                  <div><strong>{lead.name || lead.phone}</strong><small>{lead.interest || "General enquiry"}</small></div>
-                  <time>{new Date(lead.next_follow_up_at).toLocaleString()}</time>
-                </button>
-              ))}
-            </div>
-          </section>
+          <section className="panel"><div className="panelHead"><div><h2>Follow-up queue</h2><span>{followUps.length} scheduled</span></div><button className="primaryButton" onClick={() => setActiveView("dashboard")}>Back to dashboard</button></div><div className="followupList">{followUps.length === 0 ? <div className="empty">No follow-ups scheduled yet.</div> : followUps.map((lead) => <button className="followupItem" key={lead.id} onClick={() => { setSelected(lead); setActiveView("dashboard"); }}><div><strong>{lead.name || lead.phone}</strong><small>{lead.interest || "General enquiry"}</small></div><time>{new Date(lead.next_follow_up_at).toLocaleString()}</time></button>)}</div></section>
         ) : activeView === "messages" ? (
           <section className="panel"><div className="panelHead"><div><h2>Messages</h2><span>Activity is shown inside each lead</span></div></div><div className="empty">Open a lead to view its activity timeline and ask the AI assistant for a reply.</div></section>
         ) : (
-          <>
-            <section className="stats">{[["New", "new"], ["Interested", "interested"], ["Proposals", "proposal"], ["Follow-ups", "follow_up"], ["Won", "won"]].map(([name, status]) => <div key={status}><small>{name}</small><strong>{count(status)}</strong></div>)}</section>
-            <section className="panel">
-              <div className="panelHead"><div><h2>Leads</h2><span>{leads.length} total leads</span></div><button className="primaryButton" onClick={() => setShowAdd(true)}>+ Add lead</button></div>
-              <div className="toolbar"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, phone, business..." /></div>
-              <div className="pipeline">
-                {stages.map((stage) => (
-                  <div className="column" key={stage}>
-                    <div className="columnHead"><b>{labels[stage]}</b><span>{count(stage)}</span></div>
-                    {filteredLeads.filter((lead) => lead.status === stage).map((lead) => (
-                      <button className="lead" key={lead.id} onClick={() => setSelected(lead)}>
-                        <strong>{lead.name || lead.whatsapp_name || lead.phone}</strong><small>{lead.email || "No email"}</small><small>{lead.business_name || "No business"}</small><small>{lead.interest || "General enquiry"}</small>
-                        {lead.next_follow_up_at && <small>⏰ {new Date(lead.next_follow_up_at).toLocaleDateString()}</small>}
-                        {lead.deal_value && <em>₦{Number(lead.deal_value).toLocaleString()}</em>}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </section>
-          </>
+          <><section className="stats">{[["New", "new"], ["Interested", "interested"], ["Proposals", "proposal"], ["Follow-ups", "follow_up"], ["Won", "won"]].map(([name, status]) => <div key={status}><small>{name}</small><strong>{count(status)}</strong></div>)}</section>
+          <section className="panel"><div className="panelHead"><div><h2>Leads</h2><span>{leads.length} total leads</span></div><button className="primaryButton" onClick={() => setShowAdd(true)}>+ Add lead</button></div><div className="toolbar"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, phone, business..." /></div><div className="pipeline">{stages.map((stage) => <div className="column" key={stage}><div className="columnHead"><b>{labels[stage]}</b><span>{count(stage)}</span></div>{filteredLeads.filter((lead) => lead.status === stage).map((lead) => <button className="lead" key={lead.id} onClick={() => setSelected(lead)}><strong>{lead.name || lead.whatsapp_name || lead.phone}</strong><small>{lead.email || "No email"}</small><small>{lead.business_name || "No business"}</small><small>{lead.interest || "General enquiry"}</small>{lead.next_follow_up_at && <small>⏰ {new Date(lead.next_follow_up_at).toLocaleDateString()}</small>}{lead.deal_value && <em>₦{Number(lead.deal_value).toLocaleString()}</em>}</button>)}</div>)}</div></section></>
         )}
-
-        {showAdd && (
-          <div className="modalBackdrop"><form className="modal" onSubmit={addLead}><button type="button" className="close" onClick={() => setShowAdd(false)}>×</button><small>NEW LEAD</small><h2>Add a client</h2>
-            <div className="formGrid">
-              <input placeholder="Client name *" value={form.name} onChange={(e) => updateField("name", e.target.value)} required />
-              <input type="email" placeholder="Email address" value={form.email} onChange={(e) => updateField("email", e.target.value)} />
-              <input placeholder="WhatsApp number *" value={form.phone} onChange={(e) => updateField("phone", e.target.value)} required />
-              <input placeholder="WhatsApp display name" value={form.whatsapp_name} onChange={(e) => updateField("whatsapp_name", e.target.value)} />
-              <input placeholder="Business name" value={form.business_name} onChange={(e) => updateField("business_name", e.target.value)} />
-              <input placeholder="Service / interest" value={form.interest} onChange={(e) => updateField("interest", e.target.value)} />
-              <input type="number" min="0" placeholder="Potential deal value" value={form.deal_value} onChange={(e) => updateField("deal_value", e.target.value)} />
-              <select value={form.status} onChange={(e) => updateField("status", e.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{labels[stage]}</option>)}</select>
-              <input type="datetime-local" value={form.next_follow_up_at} onChange={(e) => updateField("next_follow_up_at", e.target.value)} />
-            </div>
-            <textarea placeholder="Notes about this client..." value={form.notes} onChange={(e) => updateField("notes", e.target.value)} />
-            <button className="primaryButton full" type="submit" disabled={saving}>{saving ? "Saving..." : "Create lead"}</button>
-          </form></div>
-        )}
-
-        {selected && (
-          <div className="drawer">
-            <button className="close" onClick={() => setSelected(null)}>×</button><small>LEAD DETAILS</small><h2>{selected.name || selected.whatsapp_name || selected.phone}</h2><p>{selected.business_name || "No business name"}</p>
-            <div className="details"><b>Email</b><span>{selected.email || "No email added"}</span><b>WhatsApp</b><span>{selected.phone}</span><b>Interest</b><span>{selected.interest || "—"}</span><b>Deal value</b><span>{selected.deal_value ? `₦${Number(selected.deal_value).toLocaleString()}` : "—"}</span><b>Next follow-up</b><span>{selected.next_follow_up_at ? new Date(selected.next_follow_up_at).toLocaleString() : "Not scheduled"}</span><b>Notes</b><span>{selected.notes || "—"}</span></div>
-            <div className="drawerActions">
-              <button className="primaryButton full" disabled={!selected.email} onClick={() => openEmail(selected)}>✉ Email client</button>
-              {selected.phone && <a className="secondaryButton full" href={`https://wa.me/${String(selected.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer">Open WhatsApp</a>}
-              <button className="secondaryButton full" onClick={() => askAI("next_action")} disabled={aiLoading}>🤖 {aiLoading ? "Thinking..." : "AI Next Action"}</button>
-              <button className="secondaryButton full" onClick={() => askAI("reply")} disabled={aiLoading}>✍️ AI Draft Reply</button>
-            </div>
-            {aiResult && (
-              <div className="aiBox"><b>AI Assistant</b><p>{aiResult}</p>
-                {aiAction === "next_action" && <div className="aiActions"><strong>Approved actions</strong>{aiActions.length === 0 ? <small>No safe automatic action detected. Review the recommendation manually.</small> : aiActions.map((action) => <button className="primaryButton full" key={action.type} onClick={() => applyAIAction(action)} disabled={applyingAI || selected.status === action.patch.status}>✓ {applyingAI ? "Applying..." : action.label}</button>)}</div>}
-                <button className="secondaryButton full" onClick={() => navigator.clipboard?.writeText(aiResult)}>Copy result</button>
-              </div>
-            )}
-            <div className="timeline"><h3>Activity timeline</h3>{activities.length === 0 ? <small>No messages recorded yet.</small> : activities.map((message) => <div className="activity" key={message.id}><b>{message.channel || "message"}</b><small>{message.created_at ? new Date(message.created_at).toLocaleString() : ""}</small><p>{message.content || message.body || message.message || ""}</p></div>)}</div>
-            <label>Status<select value={selected.status} onChange={(e) => updateStatus(selected.id, e.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{labels[stage]}</option>)}</select></label>
-            <button className="deleteButton" onClick={() => deleteLead(selected)}>Delete lead</button>
-          </div>
-        )}
+        {showAdd && <div className="modalBackdrop"><form className="modal" onSubmit={addLead}><button type="button" className="close" onClick={() => setShowAdd(false)}>×</button><small>NEW LEAD</small><h2>Add a client</h2><div className="formGrid"><input placeholder="Client name *" value={form.name} onChange={(e) => updateField("name", e.target.value)} required /><input type="email" placeholder="Email address" value={form.email} onChange={(e) => updateField("email", e.target.value)} /><input placeholder="WhatsApp number *" value={form.phone} onChange={(e) => updateField("phone", e.target.value)} required /><input placeholder="WhatsApp display name" value={form.whatsapp_name} onChange={(e) => updateField("whatsapp_name", e.target.value)} /><input placeholder="Business name" value={form.business_name} onChange={(e) => updateField("business_name", e.target.value)} /><input placeholder="Service / interest" value={form.interest} onChange={(e) => updateField("interest", e.target.value)} /><input type="number" min="0" placeholder="Potential deal value" value={form.deal_value} onChange={(e) => updateField("deal_value", e.target.value)} /><select value={form.status} onChange={(e) => updateField("status", e.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{labels[stage]}</option>)}</select><input type="datetime-local" value={form.next_follow_up_at} onChange={(e) => updateField("next_follow_up_at", e.target.value)} /></div><textarea placeholder="Notes about this client..." value={form.notes} onChange={(e) => updateField("notes", e.target.value)} /><button className="primaryButton full" type="submit" disabled={saving}>{saving ? "Saving..." : "Create lead"}</button></form></div>}
+        {selected && <div className="drawer"><button className="close" onClick={() => setSelected(null)}>×</button><small>LEAD DETAILS</small><h2>{selected.name || selected.whatsapp_name || selected.phone}</h2><p>{selected.business_name || "No business name"}</p><div className="details"><b>Email</b><span>{selected.email || "No email added"}</span><b>WhatsApp</b><span>{selected.phone}</span><b>Interest</b><span>{selected.interest || "—"}</span><b>Deal value</b><span>{selected.deal_value ? `₦${Number(selected.deal_value).toLocaleString()}` : "—"}</span><b>Next follow-up</b><span>{selected.next_follow_up_at ? new Date(selected.next_follow_up_at).toLocaleString() : "Not scheduled"}</span><b>Notes</b><span>{selected.notes || "—"}</span></div><div className="drawerActions"><button className="primaryButton full" disabled={!selected.email} onClick={() => openEmail(selected)}>✉ Email client</button>{selected.phone && <a className="secondaryButton full" href={`https://wa.me/${String(selected.phone).replace(/\D/g, "")}`} target="_blank" rel="noreferrer">Open WhatsApp</a>}<button className="secondaryButton full" onClick={() => askAI("next_action")} disabled={aiLoading}>🤖 {aiLoading ? "Thinking..." : "AI Next Action"}</button><button className="secondaryButton full" onClick={() => askAI("reply")} disabled={aiLoading}>✍️ AI Draft Reply</button></div>{aiResult && <div className="aiBox"><b>AI Assistant</b><p>{aiResult}</p>{aiAction === "next_action" && <div className="aiActions"><strong>Approved actions</strong>{aiActions.length === 0 ? <small>No safe automatic action detected. Review the recommendation manually.</small> : aiActions.map((action) => <button className="primaryButton full" key={action.type} onClick={() => applyAIAction(action)} disabled={applyingAI || selected.status === action.patch.status}>✓ {applyingAI ? "Applying..." : action.label}</button>)}</div>}<button className="secondaryButton full" onClick={() => navigator.clipboard?.writeText(aiResult)}>Copy result</button></div>}<div className="timeline"><h3>Activity timeline</h3>{activities.length === 0 ? <small>No messages recorded yet.</small> : activities.map((message) => <div className="activity" key={message.id}><b>{message.channel || "message"}</b><small>{message.created_at ? new Date(message.created_at).toLocaleString() : ""}</small><p>{message.content || message.body || message.message || ""}</p></div>)}</div><label>Status<select value={selected.status} onChange={(e) => updateStatus(selected.id, e.target.value)}>{stages.map((stage) => <option key={stage} value={stage}>{labels[stage]}</option>)}</select></label><button className="deleteButton" onClick={() => deleteLead(selected)}>Delete lead</button></div>}
       </main>
     </div>
   );
@@ -311,13 +273,25 @@ function Dashboard({ session }) {
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [workspaceReady, setWorkspaceReady] = useState(null);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setLoading(false); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => { setSession(newSession); if (!newSession) setWorkspaceReady(null); });
     return () => listener.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    supabase.from("workspaces").select("business_name, display_name, industry").eq("owner_id", session.user.id).maybeSingle().then(({ data, error }) => {
+      if (!active) return;
+      setWorkspaceReady(!error && !!data?.business_name);
+    });
+    return () => { active = false; };
+  }, [session]);
   if (loading) return <div className="center">Loading ROYEXA CRM...</div>;
   if (!session) return <Login />;
+  if (workspaceReady === null) return <div className="center">Preparing your workspace...</div>;
+  if (!workspaceReady) return <Onboarding session={session} onComplete={() => setWorkspaceReady(true)} />;
   return <Dashboard session={session} />;
 }
 
