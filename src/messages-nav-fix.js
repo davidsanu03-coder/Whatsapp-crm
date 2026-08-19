@@ -13,6 +13,7 @@ function styles() {
   const s = document.createElement("style");
   s.id = STYLE_ID;
   s.textContent = `
+    [data-rx-messages-hidden="1"]{display:none!important}
     #${VIEW_ID}{padding:28px;min-height:100%;box-sizing:border-box;color:#eef7f1}
     .rx-msg-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}
     .rx-msg-head h1{margin:0;font-size:28px}.rx-msg-head p{margin:5px 0 0;color:#91a39a}
@@ -55,11 +56,9 @@ function openMessages() {
   let root = document.getElementById(VIEW_ID);
   if (!root) { root = document.createElement("div"); root.id = VIEW_ID; document.body.appendChild(root); }
   root.style.display = "block";
-  document.querySelectorAll("#root > *").forEach(el => { if (el !== root && el.id !== VIEW_ID) el.dataset.rxMessagesHidden = "1"; });
+  document.querySelectorAll("#root > *").forEach(el => { if (el.id !== VIEW_ID) el.dataset.rxMessagesHidden = "1"; });
   loadView(root);
 }
-
-function closeMessages(){ const root=document.getElementById(VIEW_ID); if(root) root.style.display="none"; document.querySelectorAll('[data-rx-messages-hidden="1"]').forEach(el=>{delete el.dataset.rxMessagesHidden}); }
 
 function bind(){
   document.querySelectorAll("button,a").forEach(el=>{
