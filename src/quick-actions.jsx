@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createClient } from "@supabase/supabase-js";
 import "./quick-actions.css";
+
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 
 function findAndClick(labels) {
   const wanted = labels.map(v => v.toLowerCase());
@@ -13,17 +16,63 @@ function findAndClick(labels) {
   return false;
 }
 
+async function gmailRequest(path, options = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error("Please sign in to connect Gmail.");
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gmail-oauth/${path}`, {
+    ...options,
+    headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || "Gmail connection request failed.");
+  return body;
+}
+
 function GmailModal({ onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    gmailRequest("status").then(result => { if (active) setStatus(result); }).catch(err => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, []);
+
+  const connect = async () => {
+    setLoading(true); setError("");
+    try {
+      const result = await gmailRequest("start");
+      if (!result.url) throw new Error("Google authorization URL was not returned.");
+      window.location.assign(result.url);
+    } catch (err) {
+      setError(err.message || "Unable to start Gmail connection.");
+      setLoading(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setLoading(true); setError("");
+    try {
+      await gmailRequest("disconnect", { method: "POST" });
+      setStatus({ connected: false, connection: null });
+    } catch (err) {
+      setError(err.message || "Unable to disconnect Gmail.");
+    } finally { setLoading(false); }
+  };
+
   return <div className="qa-overlay" onClick={onClose}>
     <div className="qa-modal" onClick={e => e.stopPropagation()}>
       <button className="qa-close" onClick={onClose}>×</button>
       <div className="qa-icon gmail">G</div>
       <small>EMAIL ASSISTANT</small>
-      <h2>Connect Gmail</h2>
-      <p>Connect your business Gmail so ROYEXA can search emails, summarize conversations, draft replies and send messages when you explicitly authorize it.</p>
+      <h2>{status?.connected ? "Gmail Connected" : "Connect Gmail"}</h2>
+      <p>{status?.connected ? `ROYEXA is connected to ${status.connection.email}.` : "Connect your business Gmail so ROYEXA can search emails, summarize conversations, draft replies and send messages when you explicitly authorize it."}</p>
       <div className="qa-permissions"><div><b>Read</b><span>Search and understand emails</span></div><div><b>Draft</b><span>Create replies and new messages</span></div><div><b>Send</b><span>Only after your approval</span></div></div>
-      <button className="qa-primary" onClick={() => alert("Gmail OAuth is the next integration step. No Google credentials are stored in the browser.")}>Connect with Google</button>
-      <small className="qa-note">Secure OAuth connection · Your password is never shared with ROYEXA.</small>
+      {error && <div className="qa-error">{error}</div>}
+      {status?.connected ? <button className="qa-primary" onClick={disconnect} disabled={loading}>{loading ? "Disconnecting…" : "Disconnect Gmail"}</button> : <button className="qa-primary" onClick={connect} disabled={loading}>{loading ? "Opening Google…" : "Connect with Google"}</button>}
+      <small className="qa-note">Secure OAuth connection · Your Google password is never shared with ROYEXA.</small>
     </div>
   </div>;
 }
@@ -36,10 +85,7 @@ function QuickActions() {
     window.addEventListener("resize", close);
     return () => window.removeEventListener("resize", close);
   }, []);
-  const run = (labels) => {
-    setMoreOpen(false);
-    if (!findAndClick(labels)) window.scrollTo({ top: 0, behavior: "smooth" });
-  };
+  const run = (labels) => { setMoreOpen(false); if (!findAndClick(labels)) window.scrollTo({ top: 0, behavior: "smooth" }); };
   return <>
     <div className="qa-desktop">
       <div className="qa-title">BUSINESS TOOLS</div>
