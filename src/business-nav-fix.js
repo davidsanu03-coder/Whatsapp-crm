@@ -1,0 +1,11 @@
+function mountBusinessNav(){
+  if(!document.getElementById('royexa-business-nav-style')){const s=document.createElement('style');s.id='royexa-business-nav-style';s.textContent='.royexa-business-tools{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.08)}.royexa-business-tools button{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin:3px 0;border:1px solid transparent;border-radius:10px;background:transparent;color:inherit;font:inherit;font-weight:600;cursor:pointer;text-align:left}.royexa-business-tools button:hover{background:rgba(88,255,115,.08);border-color:rgba(88,255,115,.16)}.royexa-business-tools .gmail b{color:#ea4335}';document.head.appendChild(s)}
+  const nav=document.querySelector('aside nav');if(!nav||nav.querySelector('.royexa-business-tools'))return;
+  const tools=document.createElement('div');tools.className='royexa-business-tools';tools.innerHTML='<button data-tool="assistant">✦ <span>Business Assistant</span></button><button data-tool="followups">↻ <span>Follow-ups</span></button><button data-tool="analytics">⌁ <span>Growth Analysis</span></button><button class="gmail" data-tool="gmail"><b>G</b> <span>Connect Gmail</span></button>';nav.appendChild(tools);
+  const navBtn=t=>[...document.querySelectorAll('aside nav button')].find(b=>(b.textContent||'').toLowerCase().includes(t));
+  tools.querySelector('[data-tool="assistant"]').onclick=()=>{const b=navBtn('ai assistant')||[...document.querySelectorAll('button')].find(b=>/AI Assistant/i.test(b.textContent||''));if(b)b.click()};
+  tools.querySelector('[data-tool="followups"]').onclick=()=>{const b=navBtn('follow');if(b)b.click();else alert('Follow-ups workspace is being wired to your CRM follow-up dates.')};
+  tools.querySelector('[data-tool="analytics"]').onclick=()=>{const b=navBtn('growth');if(b)b.click();else alert('Growth Analysis is available from the Growth Analytics view.')};
+  tools.querySelector('[data-tool="gmail"]').onclick=()=>window.dispatchEvent(new CustomEvent('royexa:gmail-connect'));
+}
+const observer=new MutationObserver(mountBusinessNav);observer.observe(document.documentElement,{childList:true,subtree:true});if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mountBusinessNav);else mountBusinessNav();setTimeout(mountBusinessNav,500);
