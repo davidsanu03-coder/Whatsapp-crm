@@ -15,55 +15,40 @@ function Assistant() {
   const [pending, setPending] = useState([]);
   const [error, setError] = useState("");
 
-  async function loadLeads() {
-    const { data } = await supabase.from("leads").select("*").order("updated_at", { ascending: false });
-    setLeads(data || []);
-  }
-  useEffect(() => { loadLeads(); }, []);
+  async function loadLeads() { const { data } = await supabase.from("leads").select("*").order("updated_at", { ascending: false }); setLeads(data || []); }
+  useEffect(() => {
+    loadLeads();
+    const openHandler = () => { setOpen(true); setError(""); };
+    window.addEventListener("royexa:assistant-open", openHandler);
+    return () => window.removeEventListener("royexa:assistant-open", openHandler);
+  }, []);
 
   const context = useMemo(() => leads.slice(0, 100).map(l => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, business_name: l.business_name, interest: l.interest, status: l.status, deal_value: l.deal_value, next_follow_up_at: l.next_follow_up_at })), [leads]);
 
   async function sendMessage(e) {
-    e?.preventDefault();
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput(""); setError(""); setBusy(true);
-    const next = [...messages, { role: "user", text }];
-    setMessages(next);
+    e?.preventDefault(); const text = input.trim(); if (!text || busy) return;
+    setInput(""); setError(""); setBusy(true); const next = [...messages, { role: "user", text }]; setMessages(next);
     try {
       const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "chat", message: text, history: next.slice(-12), leads: context } });
-      if (error) throw new Error(error.message || "AI request failed.");
-      if (!data?.ok) throw new Error(data?.error || "AI request failed.");
-      setMessages(current => [...current, { role: "assistant", text: data.result || "No response." }]);
-      if (Array.isArray(data.actions)) setPending(data.actions);
-    } catch (e) {
-      setError(e.message || "AI request failed.");
-    } finally { setBusy(false); }
+      if (error) throw new Error(error.message || "AI request failed."); if (!data?.ok) throw new Error(data?.error || "AI request failed.");
+      setMessages(current => [...current, { role: "assistant", text: data.result || "No response." }]); if (Array.isArray(data.actions)) setPending(data.actions);
+    } catch (e) { setError(e.message || "AI request failed."); } finally { setBusy(false); }
   }
 
   async function execute(action) {
     setBusy(true); setError("");
     try {
       const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "execute_task", task: action } });
-      if (error) throw new Error(error.message || "Task execution failed.");
-      if (!data?.ok) throw new Error(data?.error || "Task execution failed.");
-      setMessages(current => [...current, { role: "assistant", text: `✓ Done: ${data.message || action.label}` }]);
-      setPending(current => current.filter(a => a.id !== action.id));
-      await loadLeads();
-    } catch (e) { setError(e.message || "Task execution failed."); }
-    finally { setBusy(false); }
+      if (error) throw new Error(error.message || "Task execution failed."); if (!data?.ok) throw new Error(data?.error || "Task execution failed.");
+      setMessages(current => [...current, { role: "assistant", text: `✓ Done: ${data.message || action.label}` }]); setPending(current => current.filter(a => a.id !== action.id)); await loadLeads();
+    } catch (e) { setError(e.message || "Task execution failed."); } finally { setBusy(false); }
   }
 
-  if (!open) return <button onClick={() => setOpen(true)} aria-label="Open ROYEXA AI Assistant" style={fab}>🤖 AI Assistant</button>;
+  if (!open) return <button type="button" onClick={() => setOpen(true)} aria-label="Open ROYEXA AI Assistant" style={fab}>🤖 AI Assistant</button>;
   return <div style={panel}>
-    <div style={head}><div><strong>🤖 ROYEXA AI</strong><small> Assistant + approved actions</small></div><button onClick={() => setOpen(false)} style={icon}>×</button></div>
-    <div style={body}>
-      {messages.map((m, i) => <div key={i} style={m.role === "user" ? userBubble : aiBubble}><b>{m.role === "user" ? "You" : "AI"}</b><div style={{ whiteSpace: "pre-wrap", marginTop: 5 }}>{m.text}</div></div>)}
-      {pending.length > 0 && <div style={actionsBox}><b>Approval required</b>{pending.map(a => <div key={a.id} style={actionRow}><span>{a.label}</span><button disabled={busy} onClick={() => execute(a)} style={approve}>Approve & execute</button></div>)}</div>}
-      {error && <div style={errorBox}>{error}</div>}
-      {busy && <div style={typing}>Working…</div>}
-    </div>
-    <form onSubmit={sendMessage} style={composer}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask anything or give me a task…"/><button disabled={busy || !input.trim()}>➤</button></form>
+    <div style={head}><div><strong>🤖 ROYEXA AI</strong><small> Assistant + approved actions</small></div><button type="button" onClick={() => setOpen(false)} style={icon}>×</button></div>
+    <div style={body}>{messages.map((m, i) => <div key={i} style={m.role === "user" ? userBubble : aiBubble}><b>{m.role === "user" ? "You" : "AI"}</b><div style={{ whiteSpace: "pre-wrap", marginTop: 5 }}>{m.text}</div></div>)}{pending.length > 0 && <div style={actionsBox}><b>Approval required</b>{pending.map(a => <div key={a.id} style={actionRow}><span>{a.label}</span><button type="button" disabled={busy} onClick={() => execute(a)} style={approve}>Approve & execute</button></div>)}</div>}{error && <div style={errorBox}>{error}</div>}{busy && <div style={typing}>Working…</div>}</div>
+    <form onSubmit={sendMessage} style={composer}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask anything or give me a task…"/><button type="submit" disabled={busy || !input.trim()}>➤</button></form>
   </div>;
 }
 
@@ -81,5 +66,5 @@ const errorBox = { margin:"8px 0", padding:10, borderRadius:10, background:"#3a1
 const typing = { color:"#a7a7ad", padding:8 };
 const composer = { display:"flex", gap:8, padding:12, borderTop:"1px solid #2a2a2e", background:"#0b0b0d" };
 
-function mount() { const node = document.createElement("div"); node.id = "royexa-ai-root"; document.body.appendChild(node); createRoot(node).render(<Assistant />); }
+function mount() { if (document.getElementById("royexa-ai-root")) return; const node = document.createElement("div"); node.id = "royexa-ai-root"; document.body.appendChild(node); createRoot(node).render(<Assistant />); }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount); else mount();
