@@ -6,10 +6,25 @@ const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env
 const stages = ["new", "contacted", "interested", "proposal", "negotiating", "follow_up", "won"];
 const labels = { new: "New", contacted: "Contacted", interested: "Interested", proposal: "Proposal", negotiating: "Negotiating", follow_up: "Follow-up", won: "Won" };
 
+function isGmailTask(text) {
+  return /\b(gmail|email|emails|inbox|mail)\b/i.test(text);
+}
+function gmailTaskFrom(text) {
+  const t = text.toLowerCase();
+  if (/\b(search|find|look for)\b/.test(t)) return { task: "search", query: text.replace(/.*?\b(search|find|look for)\b/i, "").replace(/\b(in|on)\s+(my\s+)?gmail\b/i, "").trim() };
+  if (/\b(briefing|daily|today|important)\b/.test(t)) return { task: "briefing" };
+  if (/\b(summarize|summary|summarise)\b/.test(t)) return { task: "summarize" };
+  return { task: "inbox" };
+}
+function formatEmails(emails = []) {
+  if (!emails.length) return "I checked your Gmail, but there are no matching emails.";
+  return emails.map((e, i) => `${i + 1}. **${e.subject}**\nFrom: ${e.from}\nDate: ${e.date}\n${e.snippet || ""}`).join("\n\n");
+}
+
 function Assistant() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([{ role: "assistant", text: "Hi 👋 I’m your ROYEXA AI Assistant. Ask me about your CRM, sales, writing, research, or anything else." }]);
+  const [messages, setMessages] = useState([{ role: "assistant", text: "Hi 👋 I’m your ROYEXA AI Assistant. Ask me about your CRM, sales, Gmail, writing, research, or anything else." }]);
   const [leads, setLeads] = useState([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState([]);
@@ -25,14 +40,35 @@ function Assistant() {
 
   const context = useMemo(() => leads.slice(0, 100).map(l => ({ id: l.id, name: l.name, email: l.email, phone: l.phone, business_name: l.business_name, interest: l.interest, status: l.status, deal_value: l.deal_value, next_follow_up_at: l.next_follow_up_at })), [leads]);
 
+  async function runGmail(text) {
+    const task = gmailTaskFrom(text);
+    const { data, error } = await supabase.functions.invoke("gmail-tasks", { body: task });
+    if (error) throw new Error(error.message || "Gmail task failed.");
+    if (!data?.ok) throw new Error(data?.error || "Gmail task failed.");
+    if (task.task === "summarize" || task.task === "briefing") {
+      const emails = data.emails || [];
+      if (!emails.length) return "I checked your Gmail, but there are no recent emails to summarize.";
+      const ai = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "chat", message: `Analyze these Gmail messages and give me a concise business briefing. Highlight urgent items, people who need replies, deadlines, opportunities, and risks. Do not invent facts.\n\n${JSON.stringify(emails)}`, leads: context } });
+      if (ai.error) throw new Error(ai.error.message || "AI email analysis failed.");
+      return ai.data?.result || formatEmails(emails);
+    }
+    if (task.task === "search") return `Here are the Gmail results for **${task.query || "your search"}**:\n\n${formatEmails(data.emails)}`;
+    return `📧 **Your latest Gmail**\n\n${formatEmails(data.emails)}`;
+  }
+
   async function sendMessage(e) {
     e?.preventDefault(); const text = input.trim(); if (!text || busy) return;
     setInput(""); setError(""); setBusy(true); const next = [...messages, { role: "user", text }]; setMessages(next);
     try {
+      if (isGmailTask(text)) {
+        const result = await runGmail(text);
+        setMessages(current => [...current, { role: "assistant", text: result }]);
+        return;
+      }
       const { data, error } = await supabase.functions.invoke("ai-crm-assistant", { body: { action: "chat", message: text, history: next.slice(-12), leads: context } });
       if (error) throw new Error(error.message || "AI request failed."); if (!data?.ok) throw new Error(data?.error || "AI request failed.");
       setMessages(current => [...current, { role: "assistant", text: data.result || "No response." }]); if (Array.isArray(data.actions)) setPending(data.actions);
-    } catch (e) { setError(e.message || "AI request failed."); } finally { setBusy(false); }
+    } catch (e) { setError(e.message || "Task failed."); } finally { setBusy(false); }
   }
 
   async function execute(action) {
@@ -46,7 +82,7 @@ function Assistant() {
 
   if (!open) return <button type="button" onClick={() => setOpen(true)} aria-label="Open ROYEXA AI Assistant" style={fab}>🤖 AI Assistant</button>;
   return <div style={panel}>
-    <div style={head}><div><strong>🤖 ROYEXA AI</strong><small> Assistant + approved actions</small></div><button type="button" onClick={() => setOpen(false)} style={icon}>×</button></div>
+    <div style={head}><div><strong>🤖 ROYEXA AI</strong><small> Assistant + Gmail + approved actions</small></div><button type="button" onClick={() => setOpen(false)} style={icon}>×</button></div>
     <div style={body}>{messages.map((m, i) => <div key={i} style={m.role === "user" ? userBubble : aiBubble}><b>{m.role === "user" ? "You" : "AI"}</b><div style={{ whiteSpace: "pre-wrap", marginTop: 5 }}>{m.text}</div></div>)}{pending.length > 0 && <div style={actionsBox}><b>Approval required</b>{pending.map(a => <div key={a.id} style={actionRow}><span>{a.label}</span><button type="button" disabled={busy} onClick={() => execute(a)} style={approve}>Approve & execute</button></div>)}</div>}{error && <div style={errorBox}>{error}</div>}{busy && <div style={typing}>Working…</div>}</div>
     <form onSubmit={sendMessage} style={composer}><input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask anything or give me a task…"/><button type="submit" disabled={busy || !input.trim()}>➤</button></form>
   </div>;
