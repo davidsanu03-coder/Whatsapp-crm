@@ -18,44 +18,21 @@ async function adminMfa(action, extra = {}) {
   return data;
 }
 
-async function sendEmailCode(email) {
-  const { error } = await supabase.auth.signInWithOtp({
-    email: email.trim(),
-    options: { shouldCreateUser: false }
-  });
-  if (error) throw error;
-}
-
-async function completeEmailMfa(email, code, mode = 'login') {
-  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code, type: 'email' });
-  if (error) throw error;
-  return adminMfa('complete', { mode });
-}
-
 function ForgotPassword(){const [email,setEmail]=React.useState('');const [sent,setSent]=React.useState(false);const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');const submit=async e=>{e.preventDefault();setBusy(true);setError('');try{const {error}=await supabase.auth.resetPasswordForEmail(email.trim(),{redirectTo:`${ADMIN_URL}/reset-password`});if(error)throw error;setSent(true);}catch(err){setError(err?.message||'Unable to send reset email.')}finally{setBusy(false)}};return <Shell><h1>Reset Admin password</h1>{sent?<><p>Check your email for the password reset link. It will return you to this Admin Console.</p><button onClick={()=>setSent(false)}>Send again</button></>:<form onSubmit={submit}><p>Enter the email used for your Admin account.</p><input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email" required/><button type="submit" disabled={busy}>{busy?'Sending…':'Send reset link'}</button></form>}{error&&<div className="error">{error}</div>}</Shell>}
 
 function ResetPassword({onDone}){const [password,setPassword]=React.useState('');const [confirm,setConfirm]=React.useState('');const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');const submit=async e=>{e.preventDefault();setError('');if(password.length<8){setError('Password must be at least 8 characters.');return;}if(password!==confirm){setError('Passwords do not match.');return;}setBusy(true);try{const {error}=await supabase.auth.updateUser({password});if(error)throw error;await supabase.auth.signOut();onDone();}catch(err){setError(err?.message||'Unable to update password.')}finally{setBusy(false)}};return <Shell><h1>Set new Admin password</h1><form onSubmit={submit}><input type="password" placeholder="New password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="new-password" required/><input type="password" placeholder="Confirm password" value={confirm} onChange={e=>setConfirm(e.target.value)} autoComplete="new-password" required/><button type="submit" disabled={busy}>{busy?'Updating…':'Update password'}</button></form>{error&&<div className="error">{error}</div>}</Shell>}
 
-function EmailMfa({email,onDone,onBack,mode='login'}){
- const [code,setCode]=React.useState(''); const [busy,setBusy]=React.useState(false); const [error,setError]=React.useState(''); const [sent,setSent]=React.useState(false);
- React.useEffect(()=>{let mounted=true;(async()=>{try{await sendEmailCode(email);if(mounted)setSent(true);}catch(err){if(mounted)setError(err?.message||'Unable to send verification code.')}})();return()=>{mounted=false}},[email]);
- const verify=async e=>{e.preventDefault();setBusy(true);setError('');try{await completeEmailMfa(email,code,mode);onDone();}catch(err){setError(err?.message||'Invalid or expired verification code.')}finally{setBusy(false)}};
- const resend=async()=>{setBusy(true);setError('');try{await sendEmailCode(email);setSent(true);}catch(err){setError(err?.message||'Unable to resend code.')}finally{setBusy(false)}};
- return <Shell><h1>Verify Admin email</h1><p>{sent?<>A 6-digit security code was sent to <b>{email}</b>.</>:<>Sending a 6-digit security code to <b>{email}</b>…</>}</p><form onSubmit={verify}><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} required/><button type="submit" disabled={busy||code.length!==6}>{busy?'Verifying…':'Verify email code'}</button></form><button type="button" onClick={resend} disabled={busy}>Send code again</button><button type="button" onClick={onBack} disabled={busy}>Back to sign in</button>{error&&<div className="error">{error}</div>}</Shell>;
-}
-
 function Login({onDone}){
- const [email,setEmail]=React.useState('');const [password,setPassword]=React.useState('');const [mfa,setMfa]=React.useState(false);const [forgot,setForgot]=React.useState(false);const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');
- const signIn=async e=>{e.preventDefault();setBusy(true);setError('');try{const clean=email.trim();const {error}=await supabase.auth.signInWithPassword({email:clean,password});if(error)throw error;const {data:admin,error:adminError}=await supabase.rpc('is_security_admin');if(adminError)throw adminError;if(!admin){await supabase.auth.signOut();throw new Error('This account is not authorized for the security console.');}setMfa(true);}catch(err){setError(err?.message||'Unable to sign in.')}finally{setBusy(false)}};
- if(forgot)return <ForgotPassword/>; if(mfa)return <EmailMfa email={email.trim()} onDone={onDone} onBack={()=>setMfa(false)} mode="login"/>;
- return <Shell><h1>Administrator sign in</h1><p>Email + password, followed by a one-time code sent to your Admin email.</p><form onSubmit={signIn}><input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required/><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</button><button type="button" onClick={()=>setForgot(true)}>Forgot password?</button></form>{error&&<div className="error">{error}</div>}</Shell>
+ const [email,setEmail]=React.useState('');const [password,setPassword]=React.useState('');const [forgot,setForgot]=React.useState(false);const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');
+ const signIn=async e=>{e.preventDefault();setBusy(true);setError('');try{const clean=email.trim();const {data,error}=await supabase.auth.signInWithPassword({email:clean,password});if(error)throw error;if(!data.user?.email_confirmed_at){await supabase.auth.signOut();throw new Error('Please verify your Admin email before accessing the security console.');}const {data:admin,error:adminError}=await supabase.rpc('is_security_admin');if(adminError)throw adminError;if(!admin){await supabase.auth.signOut();throw new Error('This account is not authorized for the security console.');}onDone();}catch(err){setError(err?.message||'Unable to sign in.')}finally{setBusy(false)}};
+ if(forgot)return <ForgotPassword/>;
+ return <Shell><h1>Administrator sign in</h1><p>Sign in with your Admin email and password. Your email must be verified before entering the security console.</p><form onSubmit={signIn}><input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required/><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</button><button type="button" onClick={()=>setForgot(true)}>Forgot password?</button></form>{error&&<div className="error">{error}</div>}</Shell>
 }
 
 function Reauth({email,onDone,onCancel}){
- const [password,setPassword]=React.useState('');const [step,setStep]=React.useState('password');const [code,setCode]=React.useState('');const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');
- const start=async e=>{e.preventDefault();setBusy(true);setError('');try{await adminMfa('start_reauth',{password});await sendEmailCode(email);setStep('otp');}catch(err){setError(err?.message||'Reauthentication failed.')}finally{setBusy(false)}};
- const verify=async e=>{e.preventDefault();setBusy(true);setError('');try{await completeEmailMfa(email,code,'reauth');onDone();}catch(err){setError(err?.message||'Invalid or expired verification code.')}finally{setBusy(false)}};
- return <Shell><h1>Confirm high-risk action</h1>{step==='password'?<form onSubmit={start}><p>Enter your current Admin password. We will then send a one-time code to your Admin email.</p><input type="password" placeholder="Current password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button type="submit" disabled={busy}>{busy?'Checking…':'Continue'}</button></form>:<form onSubmit={verify}><p>Enter the 6-digit code sent to <b>{email}</b>.</p><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} required/><button type="submit" disabled={busy||code.length!==6}>{busy?'Verifying…':'Confirm reauthentication'}</button></form>}<button type="button" onClick={onCancel} disabled={busy}>Cancel</button>{error&&<div className="error">{error}</div>}</Shell>;
+ const [password,setPassword]=React.useState('');const [busy,setBusy]=React.useState(false);const [error,setError]=React.useState('');
+ const verify=async e=>{e.preventDefault();setBusy(true);setError('');try{await adminMfa('start_reauth',{password});onDone();}catch(err){setError(err?.message||'Reauthentication failed.')}finally{setBusy(false)}};
+ return <Shell><h1>Confirm high-risk action</h1><form onSubmit={verify}><p>Enter your current Admin password to re-authenticate before performing a high-risk action.</p><input type="password" placeholder="Current password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button type="submit" disabled={busy}>{busy?'Checking…':'Confirm reauthentication'}</button></form><button type="button" onClick={onCancel} disabled={busy}>Cancel</button>{error&&<div className="error">{error}</div>}</Shell>;
 }
 
 function Dashboard({onSignOut}){
