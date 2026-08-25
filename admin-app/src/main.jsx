@@ -10,22 +10,38 @@ const supabase = url && key ? createClient(url, key) : null;
 function Shell({children}) { return <main className="auth"><section><b>ROYEXA</b><span>SECURITY CONSOLE</span>{children}</section></main>; }
 function Setup() { return <Shell><h1>Admin setup incomplete</h1><p className="error">The security console is not connected to its database yet. Check the Supabase URL and publishable key in Vercel, then redeploy.</p></Shell>; }
 
+function Enrollment({onDone}) {
+  const [factorId,setFactorId]=React.useState(''); const [qr,setQr]=React.useState(''); const [secret,setSecret]=React.useState('');
+  const [code,setCode]=React.useState(''); const [busy,setBusy]=React.useState(true); const [error,setError]=React.useState('');
+  React.useEffect(()=>{let mounted=true;(async()=>{try{
+    const {data,error}=await supabase.auth.mfa.enroll({factorType:'totp',friendlyName:'ROYEXA Admin'}); if(error)throw error;
+    if(!mounted)return; setFactorId(data.id); setQr(data.totp?.qr_code||''); setSecret(data.totp?.secret||'');
+  }catch(err){if(mounted)setError(err?.message||'Unable to start two-step verification setup.')}finally{if(mounted)setBusy(false)}})();return()=>{mounted=false}},[]);
+  const verify=async e=>{e.preventDefault();setBusy(true);setError('');try{
+    const {data:challenge,error:challengeError}=await supabase.auth.mfa.challenge({factorId}); if(challengeError)throw challengeError;
+    const {error:verifyError}=await supabase.auth.mfa.verify({factorId,challengeId:challenge.id,code}); if(verifyError)throw verifyError;
+    onDone();
+  }catch(err){setError(err?.message||'Invalid verification code.')}finally{setBusy(false)}};
+  return <Shell><h1>Set up 2-step verification</h1><p>Scan this QR code with Google Authenticator, Microsoft Authenticator, Authy, or another TOTP authenticator.</p>{qr?<img src={`data:image/svg+xml;utf8,${encodeURIComponent(qr)}`} alt="Authenticator QR code" style={{width:220,height:220,background:'#fff',padding:12,borderRadius:12}}/>:<p>Preparing secure setup…</p>}{secret&&<p><small>If you cannot scan the QR code, enter this setup key manually: <strong>{secret}</strong></small></p>}<form onSubmit={verify}><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" placeholder="Enter 6-digit code" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} required/><button type="submit" disabled={busy||!factorId}>{busy?'Verifying…':'Enable 2-step verification'}</button></form>{error&&<div className="error">{error}</div>}</Shell>;
+}
+
 function Login({onDone}) {
   const [email,setEmail]=React.useState(''); const [password,setPassword]=React.useState(''); const [code,setCode]=React.useState('');
-  const [factor,setFactor]=React.useState(null); const [mfa,setMfa]=React.useState(false); const [busy,setBusy]=React.useState(false); const [error,setError]=React.useState('');
+  const [factor,setFactor]=React.useState(null); const [mfa,setMfa]=React.useState(false); const [enroll,setEnroll]=React.useState(false); const [busy,setBusy]=React.useState(false); const [error,setError]=React.useState('');
   const signIn=async e=>{e.preventDefault();setBusy(true);setError('');try{
     const {error}=await supabase.auth.signInWithPassword({email:email.trim(),password}); if(error) throw error;
     const {data:admin,error:adminError}=await supabase.rpc('is_security_admin'); if(adminError) throw adminError;
     if(!admin){await supabase.auth.signOut();throw new Error('This account is not authorized for the security console.');}
     const {data:factors,error:factorError}=await supabase.auth.mfa.listFactors(); if(factorError) throw factorError;
     const verified=(factors?.totp||[]).find(f=>f.status==='verified');
-    if(!verified) throw new Error('Two-step verification is not enrolled for this admin account.');
+    if(!verified){setEnroll(true);return;}
     const {data:aal,error:aalError}=await supabase.auth.mfa.getAuthenticatorAssuranceLevel(); if(aalError) throw aalError;
     if(aal.currentLevel==='aal2'){onDone();return;}
     const {error:challengeError}=await supabase.auth.mfa.challenge({factorId:verified.id}); if(challengeError) throw challengeError;
     setFactor(verified.id);setMfa(true);
   }catch(err){setError(err?.message||'Unable to sign in.')}finally{setBusy(false)}};
   const verify=async e=>{e.preventDefault();setBusy(true);setError('');try{const {error}=await supabase.auth.mfa.challengeAndVerify({factorId:factor,code});if(error)throw error;onDone();}catch(err){setError(err?.message||'Invalid verification code.')}finally{setBusy(false)}};
+  if(enroll)return <Enrollment onDone={onDone}/>;
   return <Shell><h1>Administrator sign in</h1>{!mfa?<form onSubmit={signIn}><input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" required/><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/><button type="submit" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form>:<form onSubmit={verify}><p>Enter the 6-digit code from your authenticator.</p><input inputMode="numeric" autoComplete="one-time-code" maxLength="6" placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))} required/><button type="submit" disabled={busy}>{busy?'Verifying…':'Verify'}</button></form>}{error&&<div className="error">{error}</div>}</Shell>;
 }
 
