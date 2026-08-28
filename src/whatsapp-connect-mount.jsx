@@ -119,6 +119,11 @@ async function finishSignup(status) {
   status.textContent = `Connected ✓\n${data.verified_name || "WhatsApp Business"}${data.display_phone_number ? ` — ${data.display_phone_number}` : ""}`;
 }
 
+window.addEventListener("royexa:whatsapp-open", () => {
+  mount();
+  setTimeout(openModal, 0);
+});
+
 window.addEventListener("message", (event) => {
   if (!event.origin.endsWith("facebook.com")) return;
   let data = event.data;
