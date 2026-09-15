@@ -6,130 +6,27 @@ import "./royexa-home.css";
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 const API = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/recent-messages`;
 
-function ago(value) {
-  if (!value) return "";
-  const seconds = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return days < 7 ? `${days}d` : new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-function initials(name) {
-  return String(name || "?").trim().split(/\s+/).slice(0, 2).map(x => x[0]).join("").toUpperCase() || "?";
-}
-function clickExisting(names) {
-  const wanted = names.map(x => x.toLowerCase());
-  const nodes = [...document.querySelectorAll("button,a,[role='button']")].filter(el => !el.closest("#royexa-home-root"));
-  const hit = nodes.find(el => {
-    const text = (el.textContent || "").trim().toLowerCase();
-    return wanted.some(x => text === x || text.includes(x));
-  });
-  if (hit) { hit.click(); return true; }
-  return false;
-}
+function ago(value) { if (!value) return ""; const seconds = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000)); if (seconds < 60) return `${seconds}s`; const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes}m`; const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours}h`; const days = Math.floor(hours / 24); return days < 7 ? `${days}d` : new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+function initials(name) { return String(name || "?").trim().split(/\s+/).slice(0, 2).map(x => x[0]).join("").toUpperCase() || "?"; }
+function clickExisting(names) { const wanted = names.map(x => x.toLowerCase()); const nodes = [...document.querySelectorAll("button,a,[role='button']")].filter(el => !el.closest("#royexa-home-root")); const hit = nodes.find(el => { const text = (el.textContent || "").trim().toLowerCase(); return wanted.some(x => text === x || text.includes(x)); }); if (hit) { hit.click(); return true; } return false; }
 function openMenu() { window.dispatchEvent(new Event("royexa:mobile-menu-open")); }
 
 function Home() {
-  const [recent, setRecent] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [business, setBusiness] = useState("there");
-  const [query, setQuery] = useState("");
-
-  async function load() {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const { data } = await supabase.from("workspaces").select("business_name, display_name").eq("owner_id", session.user.id).maybeSingle();
-      if (data?.display_name || data?.business_name) setBusiness(data.display_name || data.business_name);
-      const r = await fetch(`${API}?limit=8`, { headers: { Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } });
-      if (r.ok) { const json = await r.json(); setRecent(json.messages || []); }
-    } catch (_) {} finally { setLoading(false); }
-  }
-
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  function go(names) { clickExisting(names); }
+  const [recent, setRecent] = useState([]); const [loading, setLoading] = useState(true); const [business, setBusiness] = useState("there"); const [query, setQuery] = useState("");
+  async function load() { try { const { data: { session } } = await supabase.auth.getSession(); if (!session) return; const { data } = await supabase.from("workspaces").select("business_name, display_name").eq("owner_id", session.user.id).maybeSingle(); if (data?.display_name || data?.business_name) setBusiness(data.display_name || data.business_name); const r = await fetch(`${API}?limit=8`, { headers: { Authorization: `Bearer ${session.access_token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY } }); if (r.ok) { const json = await r.json(); setRecent(json.messages || []); } } catch (_) {} finally { setLoading(false); } }
+  useEffect(() => { load(); const timer = setInterval(load, 30000); return () => clearInterval(timer); }, []);
   const filtered = recent.filter(m => [m.name, m.business_name, m.text, m.channel].join(" ").toLowerCase().includes(query.toLowerCase()));
-
+  const go = names => clickExisting(names);
+  const addLead = () => { if (go(["Leads"])) setTimeout(() => go(["Add lead"]), 120); };
   return <div className="royexa-home">
-    <header className="royexa-home-top">
-      <button className="royexa-home-menu" onClick={openMenu} aria-label="Open navigation">☰</button>
-      <div className="royexa-home-brand">ROYEXA <span>CRM</span></div>
-      <button className="royexa-home-channel" onClick={() => go(["WhatsApp"])} aria-label="Open WhatsApp">◔</button>
-    </header>
-
-    <section className="royexa-home-center">
-      <div className="royexa-home-mark">R</div>
-      <small>ROYEXA CRM</small>
-      <h1>Good to see you, {business}.</h1>
-      <p>Your business workspace is ready. What would you like to work on?</p>
-      <div className="royexa-home-actions">
-        <button onClick={() => go(["Add lead"])}><b>＋</b><span><strong>Add a lead</strong><small>Create a new client opportunity</small></span></button>
-        <button onClick={() => go(["Messages"])}><b>◌</b><span><strong>Open messages</strong><small>Continue a customer conversation</small></span></button>
-        <button onClick={() => go(["Follow-ups", "Follow Ups"])}><b>◷</b><span><strong>Follow-ups</strong><small>See what needs attention</small></span></button>
-        <button onClick={() => go(["Calendar"])}><b>□</b><span><strong>Today's meetings</strong><small>Open your calendar and meetings</small></span></button>
-      </div>
-    </section>
-
-    <section className="royexa-home-recent">
-      <div className="royexa-home-section-head"><div><small>RECENT MESSAGES</small><h2>Continue where you left off</h2></div><button onClick={() => go(["Messages"])}>View all</button></div>
-      <div className="royexa-home-search"><span>⌕</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search recent conversations" /></div>
-      {loading ? <div className="royexa-home-empty">Loading conversations…</div> : filtered.length ? <div className="royexa-home-message-grid">{filtered.map(m => <button className="royexa-home-message" key={m.id} onClick={() => { go(["Messages"]); setTimeout(() => window.dispatchEvent(new CustomEvent("royexa:open-lead", { detail: { leadId: m.lead_id, messageId: m.id } })), 100); }}><span className="royexa-home-avatar">{initials(m.name)}</span><span className="royexa-home-message-body"><strong>{m.name || "Customer"}</strong><small>{m.text || m.subject || "New conversation"}</small></span><time>{ago(m.created_at)}</time></button>)}</div> : <div className="royexa-home-empty">No recent messages yet.</div>}
-    </section>
-
+    <header className="royexa-home-top"><button className="royexa-home-menu" onClick={openMenu} aria-label="Open navigation">☰</button><div className="royexa-home-brand">ROYEXA <span>CRM</span></div><button className="royexa-home-channel" onClick={() => go(["WhatsApp"])} aria-label="Open WhatsApp">◔</button></header>
+    <section className="royexa-home-center"><div className="royexa-home-mark">R</div><small>ROYEXA CRM</small><h1>Good to see you, {business}.</h1><p>Your business workspace is ready. What would you like to work on?</p><div className="royexa-home-actions"><button onClick={addLead}><b>＋</b><span><strong>Add a lead</strong><small>Create a new client opportunity</small></span></button><button onClick={() => go(["Messages"])}><b>◌</b><span><strong>Open messages</strong><small>Continue a customer conversation</small></span></button><button onClick={() => go(["Follow-ups", "Follow Ups"])}><b>◷</b><span><strong>Follow-ups</strong><small>See what needs attention</small></span></button><button onClick={() => go(["Calendar"])}><b>□</b><span><strong>Today's meetings</strong><small>Open your calendar and meetings</small></span></button></div></section>
+    <section className="royexa-home-recent"><div className="royexa-home-section-head"><div><small>RECENT MESSAGES</small><h2>Continue where you left off</h2></div><button onClick={() => go(["Messages"])}>View all</button></div><div className="royexa-home-search"><span>⌕</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search recent conversations" /></div>{loading ? <div className="royexa-home-empty">Loading conversations…</div> : filtered.length ? <div className="royexa-home-message-grid">{filtered.map(m => <button className="royexa-home-message" key={m.id} onClick={() => { go(["Messages"]); setTimeout(() => window.dispatchEvent(new CustomEvent("royexa:open-lead", { detail: { leadId: m.lead_id, messageId: m.id } })), 100); }}><span className="royexa-home-avatar">{initials(m.name)}</span><span className="royexa-home-message-body"><strong>{m.name || "Customer"}</strong><small>{m.text || m.subject || "New conversation"}</small></span><time>{ago(m.created_at)}</time></button>)}</div> : <div className="royexa-home-empty">No recent messages yet.</div>}</section>
     <div className="royexa-home-command"><span>⌕</span><input placeholder="Search ROYEXA or jump to a feature…" onKeyDown={e => { if (e.key === "Enter" && e.currentTarget.value.trim()) { setQuery(e.currentTarget.value.trim()); e.currentTarget.blur(); } }} /><kbd>⌘ K</kbd></div>
   </div>;
 }
-
-function showHome(show) {
-  const root = document.getElementById("royexa-home-root");
-  const main = document.querySelector(".app > main");
-  if (!root || !main) return;
-  root.style.display = show ? "block" : "none";
-  main.classList.toggle("royexa-home-active", show);
-}
-
-function bindRouting() {
-  const root = document.getElementById("royexa-home-root");
-  const main = document.querySelector(".app > main");
-  if (!root || !main) return false;
-  const buttons = [...main.querySelectorAll("button")];
-  buttons.forEach(btn => {
-    if (btn.dataset.royexaHomeBound) return;
-    const text = (btn.textContent || "").trim().toLowerCase();
-    if (text.includes("dashboard")) btn.addEventListener("click", () => showHome(true));
-    else if (text.includes("growth analytics") || text.includes("follow-ups") || text === "leads" || text === "messages") btn.addEventListener("click", () => showHome(false));
-    btn.dataset.royexaHomeBound = "1";
-  });
-  return true;
-}
-
-function mount() {
-  if (document.getElementById("royexa-home-root")) return;
-  const main = document.querySelector(".app > main");
-  if (!main) return false;
-  const root = document.createElement("div");
-  root.id = "royexa-home-root";
-  main.prepend(root);
-  createRoot(root).render(<Home />);
-  bindRouting();
-  showHome(true);
-  const observer = new MutationObserver(() => bindRouting());
-  observer.observe(main, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), 15000);
-  return true;
-}
-function boot() {
-  if (mount()) return;
-  const observer = new MutationObserver(() => { if (mount()) observer.disconnect(); });
-  observer.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), 15000);
-}
+function showHome(show) { const root = document.getElementById("royexa-home-root"); const main = document.querySelector(".app > main"); if (!root || !main) return; root.style.display = show ? "block" : "none"; main.classList.toggle("royexa-home-active", show); }
+function bindRouting() { const root = document.getElementById("royexa-home-root"); const main = document.querySelector(".app > main"); if (!root || !main) return false; [...main.querySelectorAll("button")].forEach(btn => { if (btn.dataset.royexaHomeBound) return; const text = (btn.textContent || "").trim().toLowerCase(); if (text.includes("dashboard")) btn.addEventListener("click", () => showHome(true)); else if (text.includes("growth analytics") || text.includes("follow-ups") || text === "leads" || text === "messages") btn.addEventListener("click", () => showHome(false)); btn.dataset.royexaHomeBound = "1"; }); return true; }
+function mount() { if (document.getElementById("royexa-home-root")) return; const main = document.querySelector(".app > main"); if (!main) return false; const root = document.createElement("div"); root.id = "royexa-home-root"; main.prepend(root); createRoot(root).render(<Home />); bindRouting(); showHome(true); const observer = new MutationObserver(() => bindRouting()); observer.observe(main, { childList: true, subtree: true }); setTimeout(() => observer.disconnect(), 15000); return true; }
+function boot() { if (mount()) return; const observer = new MutationObserver(() => { if (mount()) observer.disconnect(); }); observer.observe(document.body, { childList: true, subtree: true }); setTimeout(() => observer.disconnect(), 15000); }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
