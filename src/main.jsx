@@ -70,6 +70,19 @@ function Dashboard({ session }) {
   async function loadLeads() { const { data, error } = await supabase.from("leads").select("*").order("updated_at", { ascending: false }); if (error) setError(error.message); else setLeads(data || []); }
   async function loadMessages() { const { data } = await supabase.from("messages").select("id,lead_id,direction,created_at").order("created_at", { ascending: false }).limit(2000); setMessages(data || []); }
   async function loadActivities(leadId) { const { data } = await supabase.from("messages").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(30); setActivities(data || []); }
+  useEffect(() => {
+    const go = (view) => setActiveView(view);
+    const handlers = {
+      "royexa:leads-open": () => go("leads"),
+      "royexa:messages-open": () => go("messages"),
+      "royexa:followups-open": () => go("followups"),
+      "royexa:analytics-open": () => go("analytics"),
+      "royexa:dashboard-open": () => go("dashboard")
+    };
+    Object.entries(handlers).forEach(([name, fn]) => window.addEventListener(name, fn));
+    return () => Object.entries(handlers).forEach(([name, fn]) => window.removeEventListener(name, fn));
+  }, []);
+
   useEffect(() => { loadLeads(); loadMessages(); const channel = supabase.channel("crm-leads").on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => { loadLeads(); loadMessages(); }).subscribe(); return () => supabase.removeChannel(channel); }, []);
   useEffect(() => { if (selected) loadActivities(selected.id); }, [selected]);
   async function updateLead(id, patch) { const { data, error } = await supabase.from("leads").update(patch).eq("id", id).select().single(); if (error) { setError(error.message); return false; } setSelected(current => current ? { ...current, ...data } : current); await loadLeads(); return true; }
